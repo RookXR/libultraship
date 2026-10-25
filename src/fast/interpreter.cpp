@@ -7592,6 +7592,12 @@ static void gfx_step() {
         if (opcode == OTR_G_VTX_OTR_FILEPATH || opcode == OTR_G_SETTIMG_OTR_FILEPATH ||
             opcode == OTR_G_DL_OTR_FILEPATH || opcode == OTR_G_PUSHCD || opcode == OTR_G_MTX_OTR_FILEPATH) {
             uintptr_t w1 = (uintptr_t)cmd->words.w1;
+#if defined(__aarch64__)
+            // AArch64 ignores the top byte of an address (TBI), and Android's allocator
+            // tags every heap pointer there (0xB4...). Strip it, or every path string
+            // that lives on the heap fails the range check below and is dropped.
+            w1 &= 0x00FFFFFFFFFFFFFFull;
+#endif
             if (w1 < 0x10000
 #if UINTPTR_MAX > 0xFFFFFFFFu
                 // On 64-bit: filter kernel/sentinel addresses.
