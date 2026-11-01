@@ -7774,7 +7774,14 @@ void Interpreter::StartFrame() {
     mPrvDimensions = mCurDimensions;
     mPrevNativeDimensions = mNativeDimensions;
     const bool postPassesActive = HasPostPasses();
-    if (!ViewportMatchesRendererResolution() || mMsaaLevel > 1 || postPassesActive) {
+#ifdef LUS_GL_GAME_FB_ALPHA
+    // The embedder reads the game's alpha from the game framebuffer's texture
+    // (GetGfxFrameBuffer), so always draw into it, never straight to the window.
+    constexpr bool forceGameFb = true;
+#else
+    constexpr bool forceGameFb = false;
+#endif
+    if (forceGameFb || !ViewportMatchesRendererResolution() || mMsaaLevel > 1 || postPassesActive) {
         mRendersToFb = true;
         if (!ViewportMatchesRendererResolution()) {
             mRapi->UpdateFramebufferParameters(mGameFb, mCurDimensions.width, mCurDimensions.height, mMsaaLevel, true,
@@ -7943,7 +7950,14 @@ void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_r
     // last frame are now safe to reuse.
     TextureCacheReleaseDeferred();
     mRapi->StartDrawToFramebuffer(mRendersToFb ? mGameFb : 0, (float)mCurDimensions.height / mNativeDimensions.height);
+#ifdef LUS_GL_GAME_FB_ALPHA
+    // The embedder shows whatever the game doesn't draw as transparent, so
+    // every frame starts from a clear (alpha 0) color buffer rather than the
+    // previous frame's pixels.
+    mRapi->ClearFramebuffer(true, true);
+#else
     mRapi->ClearFramebuffer(false, true);
+#endif
     mRdp->viewport_or_scissor_changed = true;
     mRenderingState.viewport = {};
     mRenderingState.scissor = {};

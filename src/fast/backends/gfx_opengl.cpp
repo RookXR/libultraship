@@ -979,7 +979,14 @@ void GfxRenderingAPIOGL::Init() {
     glEnable(GL_DEPTH_CLAMP);
 #endif
     glDepthFunc(GL_LEQUAL);
+#ifdef LUS_GL_GAME_FB_ALPHA
+    // Same color blend; alpha composites "over" (a + dst*(1-a)), so
+    // translucent draws keep stored alpha at 1 over opaque pixels and at
+    // their own alpha over an alpha-0 background.
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+#else
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+#endif
 
     mFrameBuffers.resize(1); // for the default screen buffer
 
@@ -1012,11 +1019,27 @@ void GfxRenderingAPIOGL::EndFrame() {
 void GfxRenderingAPIOGL::FinishRender() {
 }
 
+// Color format of offscreen framebuffers, including the game framebuffer.
+// RGB by default: the GUI presents the game texture with alpha blending, so
+// stored alpha would darken it. An embedder that reads the game's alpha
+// itself (the PaperBoat Quest build's passthrough cut-out) defines
+// LUS_GL_GAME_FB_ALPHA; frame clears then also leave alpha 0, so whatever
+// the game doesn't draw stays transparent.
+#ifdef LUS_GL_GAME_FB_ALPHA
+constexpr GLenum kFbInternalFormat = GL_RGBA8;
+constexpr GLenum kFbFormat = GL_RGBA;
+constexpr GLfloat kFbClearAlpha = 0.0f;
+#else
+constexpr GLenum kFbInternalFormat = GL_RGB8;
+constexpr GLenum kFbFormat = GL_RGB;
+constexpr GLfloat kFbClearAlpha = 1.0f;
+#endif
+
 int GfxRenderingAPIOGL::CreateFramebuffer() {
     GLuint clrbuf;
     glGenTextures(1, &clrbuf);
     glBindTexture(GL_TEXTURE_2D, clrbuf);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, 1, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, kFbInternalFormat, 1, 1, 0, kFbFormat, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -1060,13 +1083,14 @@ void GfxRenderingAPIOGL::UpdateFramebufferParameters(int fb_id, uint32_t width, 
         if (fb.width != width || fb.height != height || fb.msaa_level != msaa_level) {
             if (msaa_level <= 1) {
                 glBindTexture(GL_TEXTURE_2D, fb.clrbuf);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+                glTexImage2D(GL_TEXTURE_2D, 0, kFbInternalFormat, width, height, 0, kFbFormat, GL_UNSIGNED_BYTE,
+                             NULL);
                 glBindTexture(GL_TEXTURE_2D, 0);
                 ForgetBoundTexture();
                 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fb.clrbuf, 0);
             } else {
                 glBindRenderbuffer(GL_RENDERBUFFER, fb.clrbufMsaa);
-                glRenderbufferStorageMultisample(GL_RENDERBUFFER, msaa_level, GL_RGB8, width, height);
+                glRenderbufferStorageMultisample(GL_RENDERBUFFER, msaa_level, kFbInternalFormat, width, height);
                 glBindRenderbuffer(GL_RENDERBUFFER, 0);
                 glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, fb.clrbufMsaa);
             }
@@ -1113,7 +1137,7 @@ void GfxRenderingAPIOGL::ClearFramebuffer(bool color, bool depth) {
         glDisable(GL_SCISSOR_TEST);
     }
     glDepthMask(GL_TRUE);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearColor(0.0f, 0.0f, 0.0f, kFbClearAlpha);
     glClear((color ? GL_COLOR_BUFFER_BIT : 0) | (depth ? GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT : 0));
     glDepthMask(mCurrentDepthMask ? GL_TRUE : GL_FALSE);
     if (mLastScissorEnabled != 1) {
